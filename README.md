@@ -54,3 +54,9 @@ chmod +x install.sh
 source venv/bin/activate
 python3 main.py
 ```
+
+🤘 Author
+
+@null-patch
+💬 Talk to me on GitHub
+🌐 Powered by Python, Qt5, and San Andreas nostalgia
