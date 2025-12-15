@@ -1,0 +1,29 @@
+# Ignore Python cache folders
+__pycache__/
+**/__pycache__/
+
+# Compiled Python files
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+.env/
+.venv/
+
+# IDE files
+*.sublime-project
+*.sublime-workspace
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Output or generated folders
+/export/
+*.obj
+*.mtl
+*.log
