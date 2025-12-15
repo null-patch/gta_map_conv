@@ -2,7 +2,7 @@
   <img src="resources/icons/app_icon.png" width="96" alt="App Icon" />
 </p>
 
-<h1 align="center">GTA SA Map Converter</h1>
+<h1 align="center">GTA Map Converter</h1>
 
 <p align="center">
   Convert <b>GTA games</b> map files to Blender 2.79-compatible <code>.OBJ</code> files with textures and materials.
