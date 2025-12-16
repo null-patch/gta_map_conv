@@ -1,8 +1,3 @@
-"""
-GTA SA Map Converter - OBJ Exporter
-Exports converted GTA SA map data to Blender 2.79 compatible OBJ format
-"""
-
 import os
 import math
 import struct
@@ -17,7 +12,6 @@ try:
     from config import Config
     from core.conversion_pipeline import SceneObject
 except ImportError:
-    # Dummy classes for development
     class Config:
         def __init__(self): pass
     class SceneObject:
