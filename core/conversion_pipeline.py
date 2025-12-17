@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import traceback
+from core.models import SceneObject
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any, Callable
 from dataclasses import dataclass, field
@@ -21,7 +22,7 @@ try:
     from blender.material_builder import MaterialBuilder
     from utils.progress_tracker import ProgressTracker
     from utils.logger import Logger
-    from utils.file_utils import list_files, ensure_dir
+    from utils.file_utils import list_files, ensure_dir, get_file_operations
     from utils.error_handler import ErrorHandler
     from config import Config
 except ImportError as e:
@@ -82,25 +83,6 @@ class ConversionStats:
             'warnings': self.warnings_encountered
         }
 
-
-@dataclass
-class SceneObject:
-    """Represents a placed object in the scene"""
-    id: int
-    model_name: str
-    model_data: Dict[str, Any]
-    position: Tuple[float, float, float]
-    rotation: Tuple[float, float, float]
-    scale: Tuple[float, float, float]
-    flags: int
-    draw_distance: float
-    texture_dict: str
-    lod_level: int = 0
-    parent_id: int = -1
-    time_on: int = 0
-    time_off: int = 24
-    interior: int = 0
-    
     def get_transform_matrix(self) -> List[List[float]]:
         """Get transformation matrix for this object"""
         # Simplified transformation - actual GTA uses quaternions
@@ -135,7 +117,7 @@ class ConversionPipeline:
         
         # Utilities
         self.progress_tracker = ProgressTracker()
-        self.file_utils = FileUtils()
+        self.file_utils = get_file_operations()
         self.error_handler = ErrorHandler()
         
         # State
@@ -777,30 +759,63 @@ class ConversionPipeline:
             
         finally:
             self.stats.conversion_time += time.time() - start_time
-            
+    
     def _export_to_obj(self, scene: Dict[str, Any]) -> str:
-        """Export scene to OBJ format"""
         start_time = time.time()
-        
+
         try:
             self._update_progress("Exporting to OBJ", 98, "Writing files", 0)
-            
+
             # Generate output filename
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             output_filename = f"gta_sa_map_{timestamp}.obj"
             output_path = os.path.join(self.config.paths.output_dir, output_filename)
-            
-            # Export to OBJ
-            self.obj_exporter.export(scene, output_path)
-            
+
+            # Ensure output directory exists and is writable
+            try:
+                os.makedirs(self.config.paths.output_dir, exist_ok=True)
+            except Exception as e:
+                msg = f"Cannot create output directory '{self.config.paths.output_dir}': {e}"
+                self._log_message(msg, "ERROR")
+                raise RuntimeError(msg)
+
+            # Use exporter API. It should return True on success.
+            try:
+                # Some exporter implementations expose export_scene or export; support both.
+                exporter = self.obj_exporter
+                exported_ok = False
+                if hasattr(exporter, "export"):
+                    exported_ok = exporter.export(scene, output_path)
+                elif hasattr(exporter, "export_scene"):
+                    exported_ok = exporter.export_scene(scene, output_path)
+                else:
+                    msg = "OBJ exporter has no export/export_scene method"
+                    self._log_message(msg, "ERROR")
+                    raise RuntimeError(msg)
+            except Exception as e:
+                # Log and re-raise with context so ConversionThread can emit the error
+                err_msg = f"Error exporting OBJ: {e}"
+                self._log_message(err_msg, "ERROR")
+                raise
+
+            if not exported_ok:
+                msg = "OBJ exporter returned failure (export returned False)"
+                self._log_message(msg, "ERROR")
+                raise RuntimeError(msg)
+
+            # Confirm file exists
+            if not os.path.exists(output_path):
+                msg = f"OBJ exporter reported success but file not found: {output_path}"
+                self._log_message(msg, "ERROR")
+                raise RuntimeError(msg)
+
             self._log_message(f"Exported to: {output_path}", "SUCCESS")
-            
+
             self.stats.export_time = time.time() - start_time
             return output_path
-            
-        except Exception as e:
-            self._log_message(f"Error exporting OBJ: {str(e)}", "ERROR")
-            self.stats.errors_encountered += 1
+
+        except Exception:
+            # Ensure caller sees the exception; conversion() will handle and report it.
             raise
             
     def _cleanup_temp_files(self):

@@ -1,8 +1,3 @@
-"""
-GTA SA Map Converter - Configuration Management
-Handles settings, preferences, and project file management
-"""
-
 import json
 import os
 import sys
@@ -11,7 +6,6 @@ from dataclasses import dataclass, asdict, field
 from typing import Dict, List, Optional, Any
 import hashlib
 import pickle
-
 
 @dataclass
 class PathConfig:
@@ -48,12 +42,15 @@ class PathConfig:
         return errors
     
     def get_img_files(self) -> List[str]:
-        """Get list of IMG files in img_dir"""
+        """Get list of IMG files in img_dir (full paths)"""
         if not self.img_dir or not os.path.exists(self.img_dir):
             return []
-            
-        return [f for f in os.listdir(self.img_dir) 
-                if f.lower().endswith('.img')]
+        
+        return [
+            os.path.join(self.img_dir, f)
+            for f in os.listdir(self.img_dir)
+            if f.lower().endswith(".img")
+        ]
                 
     def get_ide_files(self) -> List[str]:
         """Get list of IDE files in maps_dir"""
@@ -80,7 +77,6 @@ class PathConfig:
                     ipl_files.append(os.path.join(root, file))
                     
         return ipl_files
-
 
 @dataclass
 class ConversionConfig:
@@ -160,6 +156,7 @@ class ConversionConfig:
 @dataclass
 class PerformanceConfig:
     """Configuration for performance settings"""
+    keep_temp_files: bool = False
     # Threading
     use_multithreading: bool = True
     max_threads: int = 4

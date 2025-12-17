@@ -3,7 +3,7 @@ import re
 import math
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any, Set
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 import logging
 
 logger = logging.getLogger(__name__)
@@ -124,7 +124,7 @@ class IPLObjectPlacement:
         if self.flags & 0x100000:  # Is vegetation
             flags_dict['is_vegetation'] = True
         if self.flags & 0x200000:  # Is tree
-            flags_dict['is_tree'] = True
+            flags_dict['is_tree'] = TrueIPLManager
         if self.flags & 0x400000: # Is palm
             flags_dict['is_palm'] = True
         if self.flags & 0x800000:  # Is wreck
@@ -883,6 +883,36 @@ class IPLManager:
             if parser.get_placements_by_model(model_name):
                 files.add(file_path)
         return list(files)
+        
+    def parse_file(self, file_path: str):
+        """
+        Parse a single IPL file and merge its placements into the master parser.
+        Returns the list of placements from this file.
+        """
+        if not os.path.exists(file_path):
+            logger.error(f"IPL file not found: {file_path}")
+            return []
+
+        parser = IPLParser()
+        placements = parser.parse_file(file_path)
+
+        if placements:
+            self.parsers[file_path] = parser
+            self.master_parser.placements.extend(placements)
+            self.master_parser.cull_zones.extend(parser.cull_zones)
+            self.master_parser.path_nodes.extend(parser.path_nodes)
+            self.master_parser.garages.extend(parser.garages)
+            self.master_parser.enex_markers.extend(parser.enex_markers)
+            self.master_parser.multi_placements.extend(parser.multi_placements)
+            self.master_parser.car_generators.extend(parser.car_generators)
+            self.file_paths.append(file_path)
+
+            logger.debug(f"Successfully parsed IPL file: {file_path} "
+                         f"({len(placements)} placements)")
+        else:
+            logger.warning(f"No placements parsed from IPL file: {file_path}")
+
+        return placements
     
     def clear(self):
         """Clear all parsed data"""

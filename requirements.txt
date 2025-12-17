@@ -1,0 +1,12 @@
+# GUI
+PyQt5>=5.15.0
+
+# File and system utilities
+psutil
+colorama
+
+# Image processing
+Pillow
+
+# Core STL dependencies
+numpy

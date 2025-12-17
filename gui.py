@@ -1,7 +1,10 @@
 import os
 import sys
 import subprocess
+import logging
 from pathlib import Path
+from typing import List, Tuple
+
 from PyQt5.QtWidgets import *
 from PyQt5.QtCore import *
 from PyQt5.QtGui import *
@@ -13,6 +16,7 @@ from utils.progress_tracker import ProgressTracker
 
 class ClickableLineEdit(QLineEdit):
     clicked = pyqtSignal()
+
     def mousePressEvent(self, event):
         super().mousePressEvent(event)
         if event.button() == Qt.LeftButton:
@@ -20,12 +24,12 @@ class ClickableLineEdit(QLineEdit):
 
 
 class DirectorySelector(QWidget):
-    def __init__(self, label_text, default_path="", dialog_title="Select Directory", parent=None):
+    def __init__(self, label_text: str, default_path: str = "", dialog_title: str = "Select Directory", parent=None):
         super().__init__(parent)
         self.dialog_title = dialog_title
         self.init_ui(label_text, default_path)
 
-    def init_ui(self, label_text, default_path):
+    def init_ui(self, label_text: str, default_path: str):
         layout = QHBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
 
@@ -61,19 +65,28 @@ class DirectorySelector(QWidget):
     def open_directory(self):
         path = self.get_path()
         if os.path.exists(path):
-            subprocess.run(['xdg-open', path])
+            try:
+                if sys.platform.startswith("linux"):
+                    subprocess.run(['xdg-open', path], check=False)
+                elif sys.platform == "darwin":
+                    subprocess.run(['open', path], check=False)
+                elif sys.platform.startswith("win"):
+                    os.startfile(path)
+            except Exception:
+                # ignore errors opening folder, but log them
+                logging.exception("Failed to open directory: %s", path)
 
-    def get_path(self):
+    def get_path(self) -> str:
         return self.path_edit.text().strip()
 
-    def set_path(self, path):
+    def set_path(self, path: str):
         self.path_edit.setText(path)
 
-    def set_valid(self, valid):
+    def set_valid(self, valid: bool):
         style = "border: 2px solid #27ae60;" if valid else "border: 2px solid #e74c3c;"
         self.path_edit.setStyleSheet(style)
 
-    def is_valid(self):
+    def is_valid(self) -> bool:
         path = self.get_path()
         return os.path.exists(path) if path else False
 
@@ -89,6 +102,7 @@ class MainWindow(QMainWindow):
         self.progress_tracker = ProgressTracker()
         self.conversion_thread = None
         self.is_converting = False
+        self._last_validation_errors: List[str] = []
 
         self.init_ui()
         self.load_settings()
@@ -115,7 +129,7 @@ class MainWindow(QMainWindow):
         layout = QGridLayout()
 
         self.img_dir_selector = DirectorySelector(
-            "GTA_SA_map:", self.config.paths.img_dir, "Select GTA_SA_map directory"
+            "GTA_SA_map:", self.config.paths.img_dir, "Select GTA_SA map directory"
         )
         layout.addWidget(self.img_dir_selector, 0, 0, 1, 2)
 
@@ -155,28 +169,40 @@ class MainWindow(QMainWindow):
         self.main_layout.addWidget(section)
 
     def setup_connections(self):
+        # keep UI responsive to user edits
         self.img_dir_selector.path_edit.textChanged.connect(
             lambda: self.validate_directory(self.img_dir_selector)
         )
         self.maps_dir_selector.path_edit.textChanged.connect(
             lambda: self.validate_directory(self.maps_dir_selector)
         )
+        self.output_dir_selector.path_edit.textChanged.connect(
+            lambda: self.validate_directory(self.output_dir_selector)
+        )
 
     def load_settings(self):
-        self.img_dir_selector.set_path(self.config.paths.img_dir)
-        self.maps_dir_selector.set_path(self.config.paths.maps_dir)
-        self.output_dir_selector.set_path(self.config.paths.output_dir)
+        try:
+            self.img_dir_selector.set_path(self.config.paths.img_dir)
+            self.maps_dir_selector.set_path(self.config.paths.maps_dir)
+            self.output_dir_selector.set_path(self.config.paths.output_dir)
 
-        self.validate_directory(self.img_dir_selector)
-        self.validate_directory(self.maps_dir_selector)
+            # validate initial values
+            self.validate_directory(self.img_dir_selector)
+            self.validate_directory(self.maps_dir_selector)
+            self.validate_directory(self.output_dir_selector)
+        except Exception:
+            self.logger.exception("Failed to load settings")
 
     def update_config(self):
         self.config.paths.img_dir = self.img_dir_selector.get_path()
         self.config.paths.maps_dir = self.maps_dir_selector.get_path()
         self.config.paths.output_dir = self.output_dir_selector.get_path()
-        self.config.save()
+        try:
+            self.config.save()
+        except Exception:
+            self.logger.exception("Failed to save config")
 
-    def validate_directory(self, selector) -> bool:
+    def validate_directory(self, selector: DirectorySelector) -> bool:
         valid = selector.is_valid()
         selector.set_valid(valid)
         return valid
@@ -184,70 +210,115 @@ class MainWindow(QMainWindow):
     def validate_directories(self):
         valid_img = self.validate_directory(self.img_dir_selector)
         valid_maps = self.validate_directory(self.maps_dir_selector)
+        valid_out = self.validate_directory(self.output_dir_selector)
 
-        if valid_img and valid_maps:
+        if valid_img and valid_maps and valid_out:
             QMessageBox.information(self, "Validation", "All directories are valid!")
         else:
-            QMessageBox.warning(self, "Validation", "Some directories are invalid.")
+            msgs = []
+            if not valid_img:
+                msgs.append("GTA_SA_map directory does not exist or is invalid.")
+            if not valid_maps:
+                msgs.append("Maps directory does not exist or is invalid.")
+            if not valid_out:
+                msgs.append("Output directory does not exist or is invalid.")
+            QMessageBox.warning(self, "Validation", "\n".join(msgs))
 
     def start_conversion(self):
-        if not self.validate_inputs():
+        """
+        Invoked when the START CONVERSION button is pressed.
+        This method performs input validation, updates config, updates UI state,
+        and emits conversion_started. It logs and displays helpful messages so the
+        user knows what's happening.
+        """
+        self.logger.info("start_conversion() called")
+        print("DEBUG: start_conversion() called")
+
+        valid, errors = self.validate_inputs()
+        print(f"DEBUG: validate_inputs returned {valid} errors={errors}")
+        self.logger.info("validate_inputs returned %s errors=%s", valid, errors)
+
+        if not valid:
+            # Show a clear message with all validation errors
+            QMessageBox.warning(self, "Conversion - Invalid Inputs", "\n".join(errors))
+            self.logger.warning("Conversion aborted due to invalid inputs: %s", errors)
             return
 
+        # update config before starting
         self.update_config()
+
+        # update UI state
         self.convert_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
         self.is_converting = True
 
+        # Inform user conversion started
         QMessageBox.information(self, "Conversion", "Conversion started!")
-        self.conversion_started.emit()
+        self.logger.info("Conversion started - emitting conversion_started")
+
+        # Emit signal and catch any exceptions thrown by connected slots
+        try:
+            self.conversion_started.emit()
+        except Exception:
+            self.logger.exception("Exception occurred while emitting conversion_started")
+            # Re-enable controls so user can try again
+            self.is_converting = False
+            self.convert_btn.setEnabled(True)
+            self.cancel_btn.setEnabled(False)
+            QMessageBox.critical(self, "Conversion", "An unexpected error occurred when starting conversion. See logs for details.")
 
     def cancel_conversion(self):
         self.is_converting = False
+        # If there's a long running thread, conversion_stopped is expected to be handled by it
+        try:
+            self.conversion_stopped.emit()
+        except Exception:
+            self.logger.exception("Exception while emitting conversion_stopped")
+
         self.convert_btn.setEnabled(True)
         self.cancel_btn.setEnabled(False)
         QMessageBox.information(self, "Conversion", "Conversion cancelled.")
-        self.conversion_stopped.emit()
+        self.logger.info("Conversion cancelled by user")
 
-    def validate_inputs(self) -> bool:
-        errors = []
+    def validate_inputs(self) -> Tuple[bool, List[str]]:
+        """
+        Validate user inputs. Returns (is_valid, errors_list).
+        Validation includes checking that directories exist and that
+        required files are present where reasonable.
+        """
+        errors: List[str] = []
 
+        # check directories exist
         if not self.img_dir_selector.is_valid():
             errors.append("GTA_SA_map directory does not exist.")
         if not self.maps_dir_selector.is_valid():
             errors.append("Maps directory does not exist.")
+        if not self.output_dir_selector.is_valid():
+            # If output path doesn't exist, try to create it. If that fails, report error.
+            out_path = self.output_dir_selector.get_path()
+            if out_path:
+                try:
+                    Path(out_path).mkdir(parents=True, exist_ok=True)
+                    # re-check validity after attempting to create
+                    if not self.output_dir_selector.is_valid():
+                        errors.append("Output directory is invalid or not writable.")
+                except Exception:
+                    errors.append("Output directory does not exist and could not be created.")
+            else:
+                errors.append("Output directory is not set.")
 
-        if self.img_dir_selector.is_valid():
-            img_dir = self.img_dir_selector.get_path()
-            img_files = [f for f in os.listdir(img_dir) if f.lower().endswith('.img')]
-            if not img_files:
-                errors.append("No .img files found in the GTA_SA_map directory.")
+        # optional: check maps folder contains files (helpful to catch empty selection)
+        maps_path = self.maps_dir_selector.get_path()
+        if maps_path and os.path.exists(maps_path):
+            try:
+                # check that there is at least one file - avoid specifying extensions in case user has custom names
+                if not any(os.path.isfile(os.path.join(maps_path, f)) for f in os.listdir(maps_path)):
+                    errors.append("Maps directory appears empty. Please ensure it contains map files.")
+            except Exception:
+                self.logger.exception("Error while inspecting maps directory")
+                errors.append("Could not read Maps directory to verify files (permission error?).")
 
-        if errors:
-            QMessageBox.critical(self, "Input Errors", "\n".join(errors))
-            return False
-
-        return True
-
-    def closeEvent(self, event):
-        if self.is_converting:
-            reply = QMessageBox.question(
-                self,
-                "Quit?",
-                "A conversion is running. Are you sure you want to exit?",
-                QMessageBox.Yes | QMessageBox.No
-            )
-            if reply != QMessageBox.Yes:
-                event.ignore()
-                return
-
-        self.update_config()
-        event.accept()
-
-
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    config = Config()
-    window = MainWindow(config)
-    window.show()
-    sys.exit(app.exec_())
+        # If there are errors, store them for UI reference and return False
+        self._last_validation_errors = errors
+        is_valid = len(errors) == 0
+        return is_valid, errors
