@@ -24,12 +24,9 @@ from config import Config
 class ConversionThread(QThread):
     """Background thread for running conversion process"""
 
-    # Signals for communication with GUI
-    # Updated to accept 4 args to match ConversionPipeline._update_progress calls:
-    # message: str, percent: int, sub_task: str, sub_percent: int
     progress_update = pyqtSignal(str, int, str, int)
     status_update = pyqtSignal(str)
-    error_signal = pyqtSignal(str, str)  # error_type, message
+    error_signal = pyqtSignal(str, str)          # error_type, message
     completion_signal = pyqtSignal(bool, str, str)  # success, output_path, message
 
     def __init__(self, config):
@@ -37,6 +34,7 @@ class ConversionThread(QThread):
         self.config = config
         self.is_running = True
         self.current_task = ""
+        self.pipeline = None      # <-- keep reference to ConversionPipeline
 
     def run(self):
         """Main conversion process"""
@@ -58,11 +56,17 @@ class ConversionThread(QThread):
             # Initialize pipeline
             self.status_update.emit("Initializing conversion pipeline...")
             pipeline = ConversionPipeline(self.config)
+            self.pipeline = pipeline  # <-- so cancel() can reach it
 
-            # Set up progress callbacks (match thread signal signature)
-            # Use lambda wrappers to emit Qt signals
-            pipeline.set_progress_callback(lambda msg, pct, sub_task="", sub_pct=0: self.progress_update.emit(msg, pct, sub_task, sub_pct))
-            pipeline.set_status_callback(lambda status: self.status_update.emit(status))
+            # Set up progress callbacks
+            pipeline.set_progress_callback(
+                lambda msg, pct, sub_task="", sub_pct=0:
+                    self.progress_update.emit(msg, pct, sub_task, sub_pct)
+            )
+            pipeline.set_status_callback(
+                lambda status:
+                    self.status_update.emit(status)
+            )
 
             # Run conversion
             self.status_update.emit("Starting conversion process...")
@@ -77,11 +81,23 @@ class ConversionThread(QThread):
             error_msg = f"Unexpected error in conversion thread:\n{str(e)}"
             self.error_signal.emit("Runtime Error", error_msg)
             traceback.print_exc()
+        finally:
+            self.pipeline = None
+
+    def cancel(self):
+        """Request cancellation of the running pipeline."""
+        self.is_running = False
+        try:
+            if self.pipeline is not None:
+                # ConversionPipeline has cancel() which sets cancel_requested=True
+                self.pipeline.cancel()
+        except Exception:
+            pass
 
     def stop(self):
-        """Gracefully stop the thread"""
-        self.is_running = False
-        # Let run() finish; wait briefly for thread termination
+        """Gracefully stop the thread."""
+        # Ask pipeline to cancel and wait for thread to finish
+        self.cancel()
         try:
             self.wait(timeout=2000)
         except Exception:

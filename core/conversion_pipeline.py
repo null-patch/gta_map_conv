@@ -120,7 +120,7 @@ class ConversionPipeline:
         self.materials: Dict[str, Dict] = {}
 
         self.thread_pool = None
-        self.max_workers = min(4, os.cpu_count() or 1)
+        self.max_workers = 1
 
     # ------------------------------------------------------------------ callbacks / logging
 

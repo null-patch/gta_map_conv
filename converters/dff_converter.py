@@ -1,12 +1,3 @@
-"""
-GTA SA Map Converter - DFF File Converter
-Converts GTA San Andreas .dff models to usable geometry data
-Note: DFF (RenderWare) format is complex and proprietary. This module provides:
-1. A simplified DFF parser for basic geometry
-2. Integration with external tools for full conversion
-3. Fallback methods for different scenarios
-"""
-
 import os
 import struct
 import zlib

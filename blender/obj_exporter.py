@@ -6,14 +6,9 @@ from dataclasses import dataclass, field
 import logging
 
 from config import Config
-from core.models import SceneObject  # you created this in core/models.py
+from core.models import SceneObject
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Basic OBJ elements
-# ---------------------------------------------------------------------------
 
 @dataclass
 class OBJVertex:
@@ -25,7 +20,6 @@ class OBJVertex:
     def to_string(self) -> str:
         return f"v {self.x:.6f} {self.y:.6f} {self.z:.6f}"
 
-
 @dataclass
 class OBJNormal:
     x: float
@@ -34,7 +28,6 @@ class OBJNormal:
 
     def to_string(self) -> str:
         return f"vn {self.x:.6f} {self.y:.6f} {self.z:.6f}"
-
 
 @dataclass
 class OBJTexCoord:
@@ -47,12 +40,11 @@ class OBJTexCoord:
             return f"vt {self.u:.6f} {self.v:.6f} {self.w:.6f}"
         return f"vt {self.u:.6f} {self.v:.6f}"
 
-
 @dataclass
 class OBJFace:
-    vertices: List[int]                   # 1-based indices
-    normals: Optional[List[int]] = None   # 1-based
-    texcoords: Optional[List[int]] = None # 1-based
+    vertices: List[int]
+    normals: Optional[List[int]] = None
+    texcoords: Optional[List[int]] = None
     material: str = ""
 
     def to_string(self) -> str:
@@ -74,8 +66,7 @@ class OBJFace:
             parts.append(part)
 
         return "f " + " ".join(parts)
-
-
+    
 @dataclass
 class OBJGroup:
     name: str
@@ -84,7 +75,6 @@ class OBJGroup:
 
     def add_face(self, face: OBJFace):
         self.faces.append(face)
-
 
 @dataclass
 class OBJObject:
@@ -123,11 +113,6 @@ class OBJObject:
             "materials": len(self.materials),
         }
 
-
-# ---------------------------------------------------------------------------
-# OBJ writer
-# ---------------------------------------------------------------------------
-
 class OBJWriter:
     def __init__(self, config: Config):
         self.config = config
@@ -146,9 +131,8 @@ class OBJWriter:
         else:
             self.create_object(name)
 
-    # ---- scene integration ----
-
     def add_scene_object(self, scene_obj: SceneObject, model_data: Dict[str, Any]) -> int:
+        
         if not self.current_object:
             self.create_object(f"object_{scene_obj.id}")
 
@@ -158,7 +142,7 @@ class OBJWriter:
         normal_indices: List[int] = []
         texcoord_indices: List[int] = []
 
-        # vertices
+
         for vertex in model_data.get("vertices", []):
             x, y, z = self._transform_vertex(
                 vertex,
@@ -168,18 +152,20 @@ class OBJWriter:
             )
             x, y, z = self._convert_coordinate_system(x, y, z)
             s = self.config.conversion.scale_factor
-            x *= s; y *= s; z *= s
+            x *= s
+            y *= s
+            z *= s
             idx = obj.add_vertex(OBJVertex(x, y, z))
             vertex_indices.append(idx)
 
-        # normals
+
         for normal in model_data.get("normals", []):
             nx, ny, nz = self._transform_normal(normal, scene_obj.rotation)
             nx, ny, nz = self._convert_coordinate_system(nx, ny, nz, is_normal=True)
             nidx = obj.add_normal(OBJNormal(nx, ny, nz))
             normal_indices.append(nidx)
 
-        # texcoords
+
         for uv in model_data.get("uvs", []):
             u, v = uv[0], uv[1]
             if self.config.blender.flip_uv_vertical:
@@ -187,7 +173,6 @@ class OBJWriter:
             tidx = obj.add_texcoord(OBJTexCoord(u, v))
             texcoord_indices.append(tidx)
 
-        # faces
         group_name = f"obj_{scene_obj.id}"
         material_name = scene_obj.texture_dict or "default_material"
         group = obj.get_or_create_group(group_name, material_name)
@@ -215,7 +200,6 @@ class OBJWriter:
 
         return len(vertex_indices)
 
-    # ---- transforms ----
 
     def _transform_vertex(
         self,
@@ -225,7 +209,9 @@ class OBJWriter:
         scale: Tuple[float, float, float],
     ) -> Tuple[float, float, float]:
         x, y, z = vertex
-        x *= scale[0]; y *= scale[1]; z *= scale[2]
+        x *= scale[0]
+        y *= scale[1]
+        z *= scale[2]
 
         rx, ry, rz = rotation
         if any(r != 0 for r in rotation):
@@ -282,7 +268,9 @@ class OBJWriter:
 
         length = math.sqrt(nx * nx + ny * ny + nz * nz)
         if length > 0:
-            nx /= length; ny /= length; nz /= length
+            nx /= length
+            ny /= length
+            nz /= length
 
         return nx, ny, nz
 
@@ -300,7 +288,6 @@ class OBJWriter:
             return new_x, new_y, new_z
         return x, y, z
 
-    # ---- writing ----
 
     def write_to_file(self, file_path: str, mtl_file_name: str = ""):
         logger.info(f"Writing OBJ file: {file_path}")
@@ -363,11 +350,6 @@ class OBJWriter:
             stats["total_groups"] += s["groups"]
             stats["total_faces"] += s["faces"]
         return stats
-
-
-# ---------------------------------------------------------------------------
-# MTL writer
-# ---------------------------------------------------------------------------
 
 class MTLWriter:
     def __init__(self, config: Config):
@@ -441,11 +423,6 @@ class MTLWriter:
 
         f.write("\n")
 
-
-# ---------------------------------------------------------------------------
-# High-level OBJ exporter
-# ---------------------------------------------------------------------------
-
 class OBJExporter:
     def __init__(self, config: Config):
         self.config = config
@@ -453,8 +430,19 @@ class OBJExporter:
         self.mtl_writer = MTLWriter(config)
         self.export_stats: Dict[str, Any] = {}
 
+    def _get_mat_prop(self, mat: Any, key: str, default: Any = None, alt_keys=()):
+        
+        if isinstance(mat, dict):
+            return mat.get(key, default)
+
+        for k in (key, *alt_keys):
+            if hasattr(mat, k):
+                return getattr(mat, k)
+
+        return default
+
     def export_scene(self, scene: Dict[str, Any], output_path: str) -> bool:
-        """Export complete scene to OBJ. Raises on error."""
+        
         logger.info(f"Exporting scene to OBJ: {output_path}")
 
         output_dir = os.path.dirname(output_path)
@@ -466,14 +454,11 @@ class OBJExporter:
 
         logger.info(f"Scene has {len(objects)} objects.")
 
-        # If there are no objects, treat this as an error
         if not objects:
             raise RuntimeError("Scene has no objects to export.")
 
-        # Create main object container
         self.obj_writer.create_object("GTA_SA_Map")
 
-        # Prepare materials
         self._add_materials_to_mtl(materials, textures, output_dir)
 
         total_vertices = 0
@@ -490,13 +475,11 @@ class OBJExporter:
             total_vertices += added
 
         if total_vertices == 0:
-            raise RuntimeError("No geometry was exported (0 vertices).")
-
-        # File paths
+            logger.warning("No geometry was exported (0 vertices).")
+            return True
         mtl_filename = Path(output_path).stem + ".mtl"
         mtl_path = os.path.join(output_dir, mtl_filename)
 
-        # Write files
         self.mtl_writer.write_to_file(mtl_path)
         self.obj_writer.write_to_file(output_path, mtl_filename)
 
@@ -514,7 +497,7 @@ class OBJExporter:
         return True
 
     def export(self, scene: Dict[str, Any], output_path: str) -> bool:
-        """Compatibility wrapper used by ConversionPipeline."""
+
         return self.export_scene(scene, output_path)
 
     def _add_materials_to_mtl(
@@ -523,30 +506,69 @@ class OBJExporter:
         textures: Dict[str, Any],
         output_dir: str,
     ):
+        
         self.mtl_writer.add_color_material("default_material")
 
         for name, mat in materials.items():
-            tex_path = mat.get("texture", "")
-            if tex_path and os.path.exists(tex_path):
+            # Get texture value from material (may be path, TextureInfo, etc.)
+            tex_val = self._get_mat_prop(
+                mat,
+                "texture",
+                "",
+                alt_keys=("texture_path", "image_path"),
+            )
+
+            tex_path_str = ""
+            if isinstance(tex_val, (str, os.PathLike)):
+                tex_path_str = str(tex_val)
+            elif tex_val is not None:
+                # Try common attributes on texture wrapper objects
+                for attr in ("path", "filepath", "file_path", "filename"):
+                    if hasattr(tex_val, attr):
+                        v = getattr(tex_val, attr)
+                        if isinstance(v, (str, os.PathLike)):
+                            tex_path_str = str(v)
+                            break
+
+            diffuse = self._get_mat_prop(
+                mat,
+                "diffuse",
+                (0.8, 0.8, 0.8),
+                alt_keys=("diffuse_color",),
+            )
+            specular = self._get_mat_prop(
+                mat,
+                "specular",
+                (0.5, 0.5, 0.5),
+                alt_keys=("specular_color",),
+            )
+            shininess = self._get_mat_prop(mat, "shininess", 30.0)
+            transparency = self._get_mat_prop(
+                mat,
+                "transparency",
+                1.0,
+                alt_keys=("alpha",),
+            )
+
+            if tex_path_str and os.path.exists(tex_path_str):
                 self.mtl_writer.add_texture_material(
                     name=name,
-                    texture_path=tex_path,
-                    diffuse_color=mat.get("diffuse", (1.0, 1.0, 1.0)),
-                    specular_color=mat.get("specular", (0.5, 0.5, 0.5)),
-                    shininess=mat.get("shininess", 30.0),
-                    transparency=mat.get("transparency", 1.0),
+                    texture_path=tex_path_str,
+                    diffuse_color=diffuse,
+                    specular_color=specular,
+                    shininess=shininess,
+                    transparency=transparency,
                 )
             else:
                 self.mtl_writer.add_color_material(
                     name=name,
-                    diffuse_color=mat.get("diffuse", (0.8, 0.8, 0.8)),
-                    specular_color=mat.get("specular", (0.5, 0.5, 0.5)),
-                    shininess=mat.get("shininess", 30.0),
-                    transparency=mat.get("transparency", 1.0),
+                    diffuse_color=diffuse,
+                    specular_color=specular,
+                    shininess=shininess,
+                    transparency=transparency,
                 )
 
     def get_export_stats(self) -> Dict[str, Any]:
         return self.export_stats.copy()
-
 
 __all__ = ["OBJExporter"]

@@ -67,13 +67,12 @@ class DirectorySelector(QWidget):
         if os.path.exists(path):
             try:
                 if sys.platform.startswith("linux"):
-                    subprocess.run(['xdg-open', path], check=False)
+                    subprocess.run(["xdg-open", path], check=False)
                 elif sys.platform == "darwin":
-                    subprocess.run(['open', path], check=False)
+                    subprocess.run(["open", path], check=False)
                 elif sys.platform.startswith("win"):
                     os.startfile(path)
             except Exception:
-                # ignore errors opening folder, but log them
                 logging.exception("Failed to open directory: %s", path)
 
     def get_path(self) -> str:
@@ -95,6 +94,12 @@ class MainWindow(QMainWindow):
     conversion_started = pyqtSignal()
     conversion_stopped = pyqtSignal()
 
+    def _update_theme_button_icon(self, dark: bool):
+        if dark:
+            self.theme_btn.setText("🌙")
+        else:
+            self.theme_btn.setText("☀️")
+
     def __init__(self, config: Config):
         super().__init__()
         self.config = config
@@ -106,6 +111,7 @@ class MainWindow(QMainWindow):
 
         self.init_ui()
         self.load_settings()
+        self.apply_theme_from_config()
         self.setup_connections()
 
     def init_ui(self):
@@ -117,6 +123,16 @@ class MainWindow(QMainWindow):
 
         main_widget = QWidget()
         self.main_layout = QVBoxLayout(main_widget)
+
+        theme_bar = QWidget()
+        theme_layout = QHBoxLayout(theme_bar)
+        theme_layout.setContentsMargins(0, 0, 0, 0)
+        theme_layout.addStretch()
+        self.theme_toggle = QCheckBox("Dark theme")
+        self.theme_toggle.setChecked(self.config.ui.theme != "light")
+        self.theme_toggle.toggled.connect(self.toggle_theme)
+        theme_layout.addWidget(self.theme_toggle)
+        self.main_layout.addWidget(theme_bar)
 
         self.create_directory_section()
         self.create_button_section()
@@ -169,7 +185,6 @@ class MainWindow(QMainWindow):
         self.main_layout.addWidget(section)
 
     def setup_connections(self):
-        # keep UI responsive to user edits
         self.img_dir_selector.path_edit.textChanged.connect(
             lambda: self.validate_directory(self.img_dir_selector)
         )
@@ -186,7 +201,6 @@ class MainWindow(QMainWindow):
             self.maps_dir_selector.set_path(self.config.paths.maps_dir)
             self.output_dir_selector.set_path(self.config.paths.output_dir)
 
-            # validate initial values
             self.validate_directory(self.img_dir_selector)
             self.validate_directory(self.maps_dir_selector)
             self.validate_directory(self.output_dir_selector)
@@ -201,6 +215,50 @@ class MainWindow(QMainWindow):
             self.config.save()
         except Exception:
             self.logger.exception("Failed to save config")
+
+        def apply_theme_from_config(self):
+        app = QApplication.instance()
+        if not app:
+            return
+        dark = self.config.ui.theme != "light"
+        if dark:
+            style_path = Path("resources/styles/dark.qss")
+            if style_path.exists():
+                try:
+                    with open(style_path, "r") as f:
+                        app.setStyleSheet(f.read())
+                except Exception:
+                    self.logger.exception("Failed to apply dark theme")
+        else:
+            app.setStyleSheet("")
+        if hasattr(self, "theme_btn") and self.theme_btn is not None:
+            self.theme_btn.setChecked(dark)
+            self._update_theme_button_icon(dark)
+
+        def toggle_theme(self, enabled: bool):
+        app = QApplication.instance()
+        if not app:
+            return
+        if enabled:
+            style_path = Path("resources/styles/dark.qss")
+            if style_path.exists():
+                try:
+                    with open(style_path, "r") as f:
+                        app.setStyleSheet(f.read())
+                    self.config.ui.theme = "dark"
+                except Exception:
+                    self.logger.exception("Failed to apply dark theme")
+            else:
+                app.setStyleSheet("")
+                self.config.ui.theme = "dark"
+        else:
+            app.setStyleSheet("")
+            self.config.ui.theme = "light"
+        self._update_theme_button_icon(enabled)
+        try:
+            self.config.save()
+        except Exception:
+            self.logger.exception("Failed to save theme preference")
 
     def validate_directory(self, selector: DirectorySelector) -> bool:
         valid = selector.is_valid()
@@ -225,12 +283,6 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Validation", "\n".join(msgs))
 
     def start_conversion(self):
-        """
-        Invoked when the START CONVERSION button is pressed.
-        This method performs input validation, updates config, updates UI state,
-        and emits conversion_started. It logs and displays helpful messages so the
-        user knows what's happening.
-        """
         self.logger.info("start_conversion() called")
         print("DEBUG: start_conversion() called")
 
@@ -239,37 +291,34 @@ class MainWindow(QMainWindow):
         self.logger.info("validate_inputs returned %s errors=%s", valid, errors)
 
         if not valid:
-            # Show a clear message with all validation errors
             QMessageBox.warning(self, "Conversion - Invalid Inputs", "\n".join(errors))
             self.logger.warning("Conversion aborted due to invalid inputs: %s", errors)
             return
 
-        # update config before starting
         self.update_config()
 
-        # update UI state
         self.convert_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
         self.is_converting = True
 
-        # Inform user conversion started
         QMessageBox.information(self, "Conversion", "Conversion started!")
         self.logger.info("Conversion started - emitting conversion_started")
 
-        # Emit signal and catch any exceptions thrown by connected slots
         try:
             self.conversion_started.emit()
         except Exception:
             self.logger.exception("Exception occurred while emitting conversion_started")
-            # Re-enable controls so user can try again
             self.is_converting = False
             self.convert_btn.setEnabled(True)
             self.cancel_btn.setEnabled(False)
-            QMessageBox.critical(self, "Conversion", "An unexpected error occurred when starting conversion. See logs for details.")
+            QMessageBox.critical(
+                self,
+                "Conversion",
+                "An unexpected error occurred when starting conversion. See logs for details.",
+            )
 
     def cancel_conversion(self):
         self.is_converting = False
-        # If there's a long running thread, conversion_stopped is expected to be handled by it
         try:
             self.conversion_stopped.emit()
         except Exception:
@@ -281,25 +330,17 @@ class MainWindow(QMainWindow):
         self.logger.info("Conversion cancelled by user")
 
     def validate_inputs(self) -> Tuple[bool, List[str]]:
-        """
-        Validate user inputs. Returns (is_valid, errors_list).
-        Validation includes checking that directories exist and that
-        required files are present where reasonable.
-        """
         errors: List[str] = []
 
-        # check directories exist
         if not self.img_dir_selector.is_valid():
             errors.append("GTA_SA_map directory does not exist.")
         if not self.maps_dir_selector.is_valid():
             errors.append("Maps directory does not exist.")
         if not self.output_dir_selector.is_valid():
-            # If output path doesn't exist, try to create it. If that fails, report error.
             out_path = self.output_dir_selector.get_path()
             if out_path:
                 try:
                     Path(out_path).mkdir(parents=True, exist_ok=True)
-                    # re-check validity after attempting to create
                     if not self.output_dir_selector.is_valid():
                         errors.append("Output directory is invalid or not writable.")
                 except Exception:
@@ -307,18 +348,44 @@ class MainWindow(QMainWindow):
             else:
                 errors.append("Output directory is not set.")
 
-        # optional: check maps folder contains files (helpful to catch empty selection)
         maps_path = self.maps_dir_selector.get_path()
         if maps_path and os.path.exists(maps_path):
             try:
-                # check that there is at least one file - avoid specifying extensions in case user has custom names
                 if not any(os.path.isfile(os.path.join(maps_path, f)) for f in os.listdir(maps_path)):
                     errors.append("Maps directory appears empty. Please ensure it contains map files.")
             except Exception:
                 self.logger.exception("Error while inspecting maps directory")
                 errors.append("Could not read Maps directory to verify files (permission error?).")
 
-        # If there are errors, store them for UI reference and return False
         self._last_validation_errors = errors
         is_valid = len(errors) == 0
         return is_valid, errors
+
+    def closeEvent(self, event: QCloseEvent):
+        if self.is_converting:
+            reply = QMessageBox.question(
+                self,
+                "Conversion in Progress",
+                "A conversion is currently running. Do you really want to quit?",
+                QMessageBox.Yes | QMessageBox.No,
+            )
+            if reply == QMessageBox.No:
+                event.ignore()
+                return
+            try:
+                self.conversion_stopped.emit()
+                self.logger.info("User closed window; requested conversion stop.")
+            except Exception:
+                self.logger.exception("Failed to emit conversion_stopped in closeEvent")
+
+        try:
+            self.update_config()
+        except Exception:
+            self.logger.exception("Failed to update config on close")
+
+        try:
+            self.config.save()
+        except Exception:
+            self.logger.exception("Failed to save config on close")
+
+        event.accept()
