@@ -216,7 +216,7 @@ class MainWindow(QMainWindow):
         except Exception:
             self.logger.exception("Failed to save config")
 
-        def apply_theme_from_config(self):
+    def apply_theme_from_config(self):
         app = QApplication.instance()
         if not app:
             return
@@ -235,7 +235,7 @@ class MainWindow(QMainWindow):
             self.theme_btn.setChecked(dark)
             self._update_theme_button_icon(dark)
 
-        def toggle_theme(self, enabled: bool):
+    def toggle_theme(self, enabled: bool):
         app = QApplication.instance()
         if not app:
             return

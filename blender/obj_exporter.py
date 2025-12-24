@@ -5,10 +5,10 @@ from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, field
 import logging
 
-<<<<<<< HEAD
+
 from config import Config
 from core.models import SceneObject
-=======
+
 # Local imports
 try:
     from config import Config
@@ -18,7 +18,7 @@ except ImportError:
         def __init__(self): pass
     class SceneObject:
         def __init__(self): pass
->>>>>>> GTA-Map-conv/main
+
 
 logger = logging.getLogger(__name__)
 

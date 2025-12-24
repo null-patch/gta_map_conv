@@ -1,15 +1,19 @@
-"""
-GTA SA Map Converter - Core Module
-Core conversion logic and pipeline orchestration
-"""
-
-from .conversion_pipeline import ConversionPipeline, ConversionStats, SceneObject, BatchProcessor
-from .project_manager import ProjectManager
-
 __all__ = [
-    'ConversionPipeline',
-    'ConversionStats',
-    'SceneObject',
-    'BatchProcessor',
-    'ProjectManager'
+    "ConversionPipeline",
+    "ConversionStats",
+    "BatchProcessor",
+    "ProjectManager",
+    "SceneObject",
 ]
+
+def __getattr__(name):
+    if name in ("ConversionPipeline", "ConversionStats", "BatchProcessor"):
+        from .conversion_pipeline import ConversionPipeline, ConversionStats, BatchProcessor
+        return {"ConversionPipeline": ConversionPipeline, "ConversionStats": ConversionStats, "BatchProcessor": BatchProcessor}[name]
+    if name == "ProjectManager":
+        from .project_manager import ProjectManager
+        return ProjectManager
+    if name == "SceneObject":
+        from .models import SceneObject
+        return SceneObject
+    raise AttributeError(name)
